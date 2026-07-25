@@ -18,7 +18,12 @@ Globals:
     TracingEnabled: true
 Resources:
   # Add your Lambda function resources here.
-  
+  TransactionInterceptorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/functions/transaction-interceptor/
+      Handler: Lambda.handler
+      Runtime: nodejs18.x
 
 Outputs:
   # Add stack outputs here.
