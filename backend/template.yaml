@@ -1,24 +1,176 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: >
-  backend
+Description: Green Banking Backend for NaturEra
 
-  Sample SAM Template for backend
-
-# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
 Globals:
   Function:
-    Timeout: 3
+    Runtime: nodejs20.x
+    Timeout: 10
+    MemorySize: 256
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref NaturEraGreenBankingTable
+        CARBON_QUOTA_LIMIT: 1000
+        REWARD_THRESHOLD: 300
+        # ⚠️ CẦN ĐỐI CHIẾU: kiểm tra config.js đang đọc đúng 2 tên biến này
+        # (CARBON_QUOTA_LIMIT / REWARD_THRESHOLD), không phải CARBON_QUOTA_LIMIT_KG /
+        # REWARD_THRESHOLD_KG như bản trước — và giá trị 1000/300 có phải chủ đích
+        # đổi từ 500/250 hay bị lệch ngoài ý muốn.
 
-    Tracing: Active
-    # You can add LoggingConfig parameters such as the Logformat, Log Group, and SystemLogLevel or ApplicationLogLevel. Learn more here https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-resource-function.html#sam-function-loggingconfig.
-    LoggingConfig:
-      LogFormat: JSON
-  Api:
-    TracingEnabled: true
 Resources:
-  # Add your Lambda function resources here.
-  
+  NaturEraGreenBankingTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref TableNameParam
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: StatMonth
+          AttributeType: S
+        - AttributeName: totalCo2Kg
+          AttributeType: N
+        - AttributeName: LockedFlag
+          AttributeType: S # Giữ String — xem ghi chú: code phải ghi giá trị String, KHÔNG phải Boolean
+        - AttributeName: LockedAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: TTL
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      GlobalSecondaryIndexes:
+        # GSI 1: Query users dưới quota tháng (dùng trong Monthly Batch)
+        - IndexName: StatMonthIndex
+          KeySchema:
+            - AttributeName: StatMonth
+              KeyType: HASH
+            - AttributeName: totalCo2Kg
+              KeyType: RANGE
+          Projection:
+            ProjectionType: INCLUDE
+            NonKeyAttributes:
+              - rewardedThisMonth
+              - rewardedAt
+              # Đã bỏ "userId" khỏi projection — item STAT không có attribute này,
+              # userId luôn được trích từ PK (PK/SK của base table LUÔN được
+              # project tự động vào mọi GSI, không cần khai báo tay).
+        # GSI 2: Query users bị khóa (sparse — chỉ có khi LockedFlag tồn tại)
+        - IndexName: LockedCardIndex
+          KeySchema:
+            - AttributeName: LockedFlag
+              KeyType: HASH
+            - AttributeName: LockedAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: INCLUDE
+            NonKeyAttributes:
+              - userId
+              - cardId
+
+  TransactionInterceptor:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/functions/transaction-interceptor/Lambda.handler
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /v1/transactions
+            Method: post
+      Policies:
+        - Statement:
+            - Sid: LeastPrivilegeUserAndConfigAccess
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:TransactWriteItems
+              Resource: !GetAtt NaturEraGreenBankingTable.Arn
+              Condition:
+                "ForAllValues:StringLike":
+                  dynamodb:LeadingKeys:
+                    - "USER#*"
+                    - "CONFIG#*"
+
+  # Monthly Batch Job: Mở khóa thẻ + tặng thưởng users dưới quota
+  MonthlyOffsetBatch:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src/functions/monthly-offset-batch/Lambda.handler
+      Timeout: 300 # 5 phút cho tác vụ batch
+      MemorySize: 512
+      Events:
+        MonthlySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 0 1 * ? *)
+      Policies:
+        - Statement:
+            - Sid: BatchQueryAndUpdateAccess
+              Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:UpdateItem
+                - dynamodb:GetItem
+              Resource:
+                - !GetAtt NaturEraGreenBankingTable.Arn
+                - !Sub "${NaturEraGreenBankingTable.Arn}/index/StatMonthIndex"
+                - !Sub "${NaturEraGreenBankingTable.Arn}/index/LockedCardIndex"
+              Condition:
+                # Monthly Batch chỉ cần USER#* — không có lý do gì chạm CONFIG#/STAFF#,
+                # nhất quán với least-privilege đã áp cho TransactionInterceptor (ADR-002).
+                "ForAllValues:StringLike":
+                  dynamodb:LeadingKeys:
+                    - "USER#*"
+
+Parameters:
+  TableNameParam:
+    Type: String
+    Default: NaturEraGreenBankingTable
+    Description: DynamoDB table name
 
 Outputs:
-  # Add stack outputs here.
+  TransactionInterceptorFunctionArn:
+    Description: ARN của Transaction Interceptor Lambda
+    Value: !GetAtt TransactionInterceptor.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-TransactionInterceptor"
+
+  MonthlyOffsetBatchFunctionArn:
+    Description: ARN của Monthly Offset Batch Lambda
+    Value: !GetAtt MonthlyOffsetBatch.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-MonthlyOffsetBatch"
+
+  DynamoDBTableArn:
+    Description: ARN của DynamoDB table
+    Value: !GetAtt NaturEraGreenBankingTable.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-DynamoDBTable"
+
+  DynamoDBTableName:
+    Description: Tên DynamoDB table
+    Value: !Ref NaturEraGreenBankingTable
+    Export:
+      Name: !Sub "${AWS::StackName}-DynamoDBTableName"
+
+  ApiEndpoint:
+    Description: API Gateway endpoint
+    # SỬA: ServerlessApi -> ServerlessRestApi (logical ID mặc định thật của SAM
+    # cho API Gateway ẩn — không tự đặt tên khác được, đây là tên cố định)
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/v1"
+    Export:
+      Name: !Sub "${AWS::StackName}-ApiEndpoint"

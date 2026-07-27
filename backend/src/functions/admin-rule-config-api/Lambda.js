@@ -1,10 +1,15 @@
-async function GetConfigHandler(event) {
-  return {
-    statusCode: 200,
-    body: JSON.stringify({
-      message: 'AdminRuleConfigApi',
-    }),
-  };
+async function AdminRuleConfigHandler(event) {
+  console.log('[AdminRuleConfig] Event:', JSON.stringify(event));
+
+  try {
+    const result = await AdminRuleConfigService(event);
+    console.log('[AdminRuleConfig] Success:', JSON.stringify(result));
+    return result; // không cần statusCode/body — không có HTTP caller nào đọc field này
+  } catch (err) {
+    console.error('[AdminRuleConfig] FAILED:', err);
+    throw err; // BẮT BUỘC throw ra ngoài — để AWS đánh dấu invocation Failed
+  }
+
 }
 
-exports.handler = AdminRuleConfigApiHandler;
+export const handler = AdminRuleConfigHandler;
