@@ -5,7 +5,7 @@ import getCurrentRules from '../repositories/ruleConfigRepo';
 /**
  * Hàm tính toán CO2 dựa trên MCC và Số tiền
  */
-async function calculateCO2(mcc, amount) {
+async function calculateCO2(amount, mcc) {
     const rules = await getCurrentRules();
     
     const coefficient = rules[mcc] ? rules[mcc] : rules["default"];

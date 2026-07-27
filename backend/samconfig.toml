@@ -3,7 +3,8 @@
 version = 0.1
 
 [default.global.parameters]
-stack_name = "backend"
+stack_name = "naturera-green-banking-dev"
+region = "ap-southeast-1"
 
 [default.build.parameters]
 cached = true
@@ -16,6 +17,8 @@ lint = true
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
 resolve_s3 = true
+s3_bucket = "naturera-sam-artifacts"  # SAM sẽ tạo nếu chưa tồn tại
+s3_prefix = "green-banking"
 
 [default.package.parameters]
 resolve_s3 = true
