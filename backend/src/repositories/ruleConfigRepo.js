@@ -1,57 +1,89 @@
-import { GetCommand } from '@aws-sdk/lib-dynamodb';
-import ddbClient from './ddbClient';
-import config from '../configs/config';
-import AppError from '../utils/AppError';
+import { GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
+import ddbClient from './ddbClient.js';
+import config from '../configs/config.js';
+import AppError from '../utils/AppError.js';
 
-let cachedCo2Rules = null;
-let lastFetchTime = 0;
-const CACHE_TTL = 5 * 60 * 1000; // Thời gian sống của cache (5 phút)
+// Tối ưu Cache (DRY): Dùng 1 Object duy nhất để quản lý nhiều loại Config
+const cache = {
+    co2Rules: { data: null, lastFetch: 0 },
+    mccMapping: { data: null, lastFetch: 0 }
+};
+const CACHE_TTL = 5 * 60 * 1000;
+
 
 /**
- * Hàm lấy cấu hình từ Database (Có dùng Cache)
+ * Repo riêng cho vùng CONFIG#* — KHÔNG dùng chung file với accountRepo.js,
+ * vì đây là bounded context khác (Admin/Staff, xem ADR-002), dù cùng 1 bảng
+ * DynamoDB vật lý.
  */
-async function getCurrentRules() {
+async function getCo2Rules() { // Đổi tên hàm từ getCurrentRules thành getCo2Rules cho khớp Service
     const now = Date.now();
     
-
-    if (cachedCo2Rules && (now - lastFetchTime < CACHE_TTL)) {
-        console.log("Lấy cấu hình CO2 từ RAM (Cache)...");
-        return cachedCo2Rules;
+    if (cache.co2Rules.data && (now - cache.co2Rules.lastFetch < CACHE_TTL)) {
+        return cache.co2Rules.data;
     }
 
-    console.log("Cache trống hoặc hết hạn. Đang tải cấu hình từ DynamoDB...");
-    
-    // Giả lập lệnh gọi DynamoDB lấy config
-    // Lệnh này sẽ lấy chính xác cục data mà hàm updateCo2Rules() của Admin vừa lưu ở trên
-    // const result = await dynamoDB.get({ TableName: 'SystemConfigs', Key: { id: 'CO2_RULES' } }).promise();
-    
-    // Dữ liệu giả lập lấy từ DB
-    // const freshRulesFromDB = {
-    //     default: 0.00001,
-    //     5411: 0.00005,
-    //     4511: 0.00002,
-    //     5812: 0.00003,
-    //     5813: 0.00006,
-    //     5814: 0.00003,
-    // };
     try {
         const result = await ddbClient.send(new GetCommand({
             TableName: config.tableName,
-            Key: { PK: 'CONFIG#CO2_RULES' , SK: 'CONFIG'},
+            Key: { PK: 'CONFIG#CO2_RULES', SK: 'CURRENT' },
         }));
         
-        if (!result.Item) {
-            return { default: 0.00001 };
-        }
-        // Lưu vào biến Cache để các giao dịch sau dùng ké
-        cachedCo2Rules = result.Item;
-        lastFetchTime = now;
-
-        return cachedCo2Rules;
-    } catch (error) {
-        console.error("Lỗi khi lấy cấu hình CO2 từ DynamoDB:", error);
-        throw new AppError('CONFIG_NOT_FOUND', 'Không tìm thấy cấu hình CO2', 500);
+        // Cập nhật Cache
+        cache.co2Rules.data = result.Item?.rules || null;
+        cache.co2Rules.lastFetch = now;
+        
+        return cache.co2Rules.data;
+    } catch (err) {
+        console.error('Error reading CO2 rules config:', err);
+        // Fallback: Trả về cache cũ nếu DB lỗi
+        if (cache.co2Rules.data) return cache.co2Rules.data;
+        throw new AppError('FAILED_TO_READ_CONFIG', 'Không thể đọc cấu hình hệ số CO2', 500);
     }
 }
 
-export default getCurrentRules;
+async function saveCo2Rules(item) {
+    try {
+        await ddbClient.send(new PutCommand({ TableName: config.tableName, Item: item }));
+        cache.co2Rules.lastFetch = 0; // Reset cache
+    } catch (err) {
+        console.error('Error saving CO2 rules config:', err);
+        throw new AppError('FAILED_TO_SAVE_CONFIG', 'Không thể lưu cấu hình hệ số CO2', 500);
+    }
+}
+
+async function getMccMapping() {
+    const now = Date.now();
+    
+    if (cache.mccMapping.data && (now - cache.mccMapping.lastFetch < CACHE_TTL)) {
+        return cache.mccMapping.data;
+    }
+
+    try {
+        const result = await ddbClient.send(new GetCommand({
+            TableName: config.tableName,
+            Key: { PK: 'CONFIG#MCC_MAPPING', SK: 'CURRENT' },
+        }));
+        
+        cache.mccMapping.data = result.Item?.mapping || null;
+        cache.mccMapping.lastFetch = now;
+        
+        return cache.mccMapping.data;
+    } catch (err) {
+        console.error('Error reading MCC mapping config:', err);
+        if (cache.mccMapping.data) return cache.mccMapping.data;
+        throw new AppError('FAILED_TO_READ_CONFIG', 'Không thể đọc từ điển MCC', 500);
+    }
+}
+
+async function saveMccMapping(item) {
+    try {
+        await ddbClient.send(new PutCommand({ TableName: config.tableName, Item: item }));
+        cache.mccMapping.lastFetch = 0; // Reset cache
+    } catch (err) {
+        console.error('Error saving MCC mapping config:', err);
+        throw new AppError('FAILED_TO_SAVE_CONFIG', 'Không thể lưu từ điển MCC', 500);
+    }
+}
+
+export { getCo2Rules, saveCo2Rules, getMccMapping, saveMccMapping };
