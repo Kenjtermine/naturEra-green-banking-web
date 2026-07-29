@@ -1,21 +1,14 @@
-// Gọi thẳng vào file Lambda của em
-const lambda = require('./src/functions/transaction-interceptor/Lambda.js');
-// Lấy cục dữ liệu giả
-const mockData = require('./src/functions/transaction-interceptor/mock-request.json');
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as lambda from './src/functions/transaction-interceptor/Lambda.js';
+
+const mockDataPath = path.resolve('./src/functions/transaction-interceptor/mock-request.json');
+const mockData = JSON.parse(fs.readFileSync(mockDataPath, 'utf8'));
 
 async function runTest() {
-    console.log("⏳ Đang chạy giả lập luồng giao dịch...");
-    
-    // Gói cục JSON lại cho giống với định dạng AWS gửi tới
-    const event = { 
-        body: JSON.stringify(mockData) 
-    };
-    
-    // Bóp cò chạy hàm
-    const result = await lambda.handler(event);
-    
-    console.log("\n✅ KẾT QUẢ TRẢ VỀ TỪ LAMBDA:");
-    console.log(JSON.parse(result.body));
+  const event = { body: JSON.stringify(mockData) };
+  const result = await lambda.handler(event);
+  console.log(JSON.parse(result.body));
 }
 
 runTest();
