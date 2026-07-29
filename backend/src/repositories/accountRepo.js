@@ -1,7 +1,7 @@
 import { TransactWriteCommand, GetCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
-import ddbClient from './ddbClient';
-import config from '../configs/config';
-import AppError from '../utils/AppError';
+import ddbClient from './ddbClient.js';
+import config from '../configs/config.js';
+import AppError from '../utils/AppError.js';
 
 /**
  * Trừ tiền + ghi log giao dịch + cộng dồn CO2 — atomic trong 1 TransactWriteItems.
@@ -30,7 +30,7 @@ async function debitAndRecordTransaction({ userId, cardId, amount, co2Amount, tr
                     ConditionCheck: {
                         TableName: config.tableName,
                         Key: { PK: `USER#${userId}`, SK: `CARD#${cardId}` },
-                        ConditionExpression: 'attribute_not_exists(LockedFlag)',
+                        ConditionExpression: 'attribute_exists(PK) AND attribute_not_exists(LockedFlag)',
                     },
                 },
                 {
@@ -75,14 +75,6 @@ async function debitAndRecordTransaction({ userId, cardId, amount, co2Amount, tr
         }
         throw err;
     }
-}
-
-async function getMonthlyCo2Usage(userId, yyyyMM) {
-    const result = await ddbClient.send(new GetCommand({
-        TableName: config.tableName,
-        Key: { PK: `USER#${userId}`, SK: `STAT#${yyyyMM}` },
-    }));
-    return result.Item || { totalCo2Kg: 0 };
 }
 
 /**
@@ -189,11 +181,106 @@ async function markUserRewarded(userId, yyyyMM) {
     }
 }
 
+/** Query user profile. */
+async function getUserProfile(userId) {
+    try {
+        const targetPK = `USER#${userId}`;
+        const result = await ddbClient.send(new GetCommand({
+            TableName: config.tableName,
+            Key: {
+                PK: targetPK,
+                SK: "PROFILE",
+            },
+        }));
+        if (!result.Item) {
+            throw new AppError('USER_NOT_FOUND', 'Không tìm thấy thông tin hồ sơ của người dùng', 404);
+        };
+        return result.Item;
+    } catch (err) {
+        //Nếu throw AppError từ trong try, PHẢI throw lại chứ không bọc thành 500
+        if (err instanceof AppError) throw err;
+        console.error('Error querying user profile:', err);
+        throw new AppError('FAILED_TO_QUERY_USER_PROFILE', 'Không thể lấy thông tin hồ sơ của người dùng', 500);
+    }
+}
+
+async function getMonthlyStat(userId, yyyyMM) {
+    try {
+        const result = await ddbClient.send(new GetCommand({
+            TableName: config.tableName,
+            Key: { 
+                PK: `USER#${userId}`, 
+                // Cấu trúc SK chuẩn theo Schema
+                SK: `STAT#${yyyyMM}` 
+            },
+        }));
+        
+        // Nếu tháng này chưa có giao dịch nào, DB sẽ không có record -> Trả về default
+        return result.Item || { totalCo2Kg: 0, categories: [] };
+    } catch (err) {
+        console.error('Lỗi khi truy vấn thống kê CO2 tháng:', err);
+        throw new AppError('FAILED_TO_QUERY_USER_STAT', 'Không thể lấy thông tin thống kê CO2', 500);
+    }
+}
+
+async function getRecentTransactions(userId, limit = 5) {
+    try {
+        // 💡 SỬA LỖI TỬ HUYỆT: Truy vấn trực tiếp trên bảng chính, không dùng Index ảo
+        // Lấy các record có PK là user đó, và SK bắt đầu bằng 'TXN#' (Lịch sử giao dịch)
+        const result = await ddbClient.send(new QueryCommand({
+            TableName: config.tableName,
+            KeyConditionExpression: 'PK = :userId AND begins_with(SK, :txnPrefix)',
+            ExpressionAttributeValues: { 
+                ':userId': `USER#${userId}`,
+                ':txnPrefix': 'TXN#'
+            },
+            // ScanIndexForward = false để lấy giao dịch MỚI NHẤT (Sắp xếp Z-A theo SK là thời gian)
+            ScanIndexForward: false, 
+            Limit: limit,
+        }));
+        return result.Items || [];
+    } catch (err) {
+        console.error('Lỗi khi lấy lịch sử giao dịch:', err);
+        throw new AppError('FAILED_TO_QUERY_RECENT_TXNS', 'Không thể lấy lịch sử giao dịch', 500);
+    }
+}
+
+async function getMonthlyCo2Usage(userId, yyyyMM) {
+    try {
+        const result = await ddbClient.send(new GetCommand({
+            TableName: config.tableName,
+            Key: { PK: `USER#${userId}`, SK: `STAT#${yyyyMM}` },
+        }));
+        return {
+            totalCo2Kg: Number(result.Item?.totalCo2Kg || 0),
+        };
+    } catch (err) {
+        console.error('Error reading monthly CO2 usage:', err);
+        throw new AppError('FAILED_TO_QUERY_MONTHLY_CO2', 'Khong the lay tong phat thai CO2 trong thang', 500);
+    }
+}
+
+async function getTransactionsForMonth(userId, yyyyMM) {
+    const result = await ddbClient.send(new QueryCommand({
+        TableName: config.tableName,
+        KeyConditionExpression: 'PK = :userId AND begins_with(SK, :monthPrefix)',
+        ExpressionAttributeValues: {
+            ':userId': `USER#${userId}`,
+            ':monthPrefix': `TXN#${yyyyMM}`,   // "TXN#2026-07" khớp mọi ngày trong tháng 7
+        },
+    }));
+    return result.Items || [];
+}
+
 export {
     debitAndRecordTransaction,
-    getMonthlyCo2Usage,
     updateCardStatus,
     queryCurrentlyLockedUsers,
     queryUsersUnderQuotaForMonth,
     markUserRewarded,
+    getMonthlyCo2Usage,
+    getUserProfile,
+    getMonthlyStat,
+    getRecentTransactions,
+    getTransactionsForMonth,
 };

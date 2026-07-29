@@ -1,28 +1,38 @@
+import AppError from '../utils/AppError.js';
 
-async function createTransaction(cardId, userId, amount, merchantId, mcc, posDeviceId) {
-    const transaction = {
-        transactionId: `txn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, // exp: txn_1697040000000_ab12cd
+function validateMoneyAmount(amount, currency) {
+    if (currency !== 'VND') {
+        throw new AppError('INVALID_CURRENCY', 'Currency is invalid. MVP only supports VND', 400);
+    }
+    if (!Number.isInteger(amount) || amount <= 0) {
+        throw new AppError('INVALID_AMOUNT', 'Amount must be a positive integer in VND', 400);
+    }
+}
+
+function createTransaction(cardId, userId, amount, currency, merchantId, mcc, posDeviceId) {
+    return {
+        transactionId: `txn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         cardId,
         userId,
         amount,
+        currency,
         merchantId,
         mcc,
-        co2Amount: 0, // Giá trị khởi tạo, sẽ được tính toán sau khi lấy config từ DB
-        status: 'PENDING', // Trạng thái mặc định
+        co2Amount: 0,
+        status: 'PENDING',
         createdAt: new Date().toISOString(),
     };
-    return transaction;
 }
 
-async function validateTransactionInput(body) {
-    required = ['cardId', 'userId', 'amount', 'merchantId', 'posDeviceId'];
-    const missingFields = required.filter((f) => body[f] === undefined || body[f] === null);
+function validateTransactionInput(body) {
+    const required = ['cardId', 'userId', 'amount', 'currency', 'merchantId', 'mcc', 'posDeviceId'];
+    const missingFields = required.filter((field) => body?.[field] === undefined || body?.[field] === null);
+
     if (missingFields.length > 0) {
-        throw new AppError('MISSING_REQUIRED_FIELDS', `Thiếu trường bắt buộc: ${missingFields.join(', ')}`, 400);
+        throw new AppError('MISSING_REQUIRED_FIELDS', `Missing required fields: ${missingFields.join(', ')}`, 400);
     }
-    if (amount <= 0 || typeof amount !== "number") {
-        throw new AppError('INVALID_AMOUNT', 'Số tiền không hợp lệ', 400);
-    }
+
+    validateMoneyAmount(body.amount, body.currency);
 }
 
-export { createTransaction, validateTransactionInput };
+export { createTransaction, validateMoneyAmount, validateTransactionInput };

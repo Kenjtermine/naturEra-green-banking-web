@@ -1,13 +1,26 @@
-const { withErrorHandling } = require('../../middlewares/errorHandler');
-const { getDashboardData } = require('../../services/dashboardApiService');
+import getDashboardData from '../../services/dashboardApiService.js';
 
-async function DashboardApiHandler(event) {
-    const userId = (event.queryStringParameters && event.queryStringParameters.userId) || "USR12345";
-    const result = await getDashboardData(userId);
-    return {
-        statusCode: 200,
-        body: JSON.stringify(result),
-    };
+async function handler(event) {
+    try {
+        const claims = event.requestContext?.authorizer?.claims || {};
+        const queryParams = event.queryStringParameters || {};
+        const userId = claims.sub || queryParams.userId;
+
+        const dashboardData = await getDashboardData(userId);
+
+        return {
+            statusCode: 200,
+            body: JSON.stringify(dashboardData),
+        };
+    } catch (err) {
+        return {
+            statusCode: err.statusCode || 500,
+            body: JSON.stringify({
+                errorCode: err.errorCode || 'INTERNAL_ERROR',
+                message: err.message || 'Internal server error',
+            }),
+        };
+    }
 }
 
-exports.handler = withErrorHandling(DashboardApiHandler);
+export { handler };

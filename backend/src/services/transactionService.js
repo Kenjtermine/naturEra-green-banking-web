@@ -1,16 +1,15 @@
-import AppError from '../utils/AppError';
-import calculateCO2 from '../utils/co2Calculator';
+import calculateCO2 from '../utils/co2Calculator.js';
 import config from '../configs/config.js';
-import { createTransaction, validateTransactionInput } from '../models/transactionModel';
-import { debitAndRecordTransaction, getMonthlyCo2Usage, updateCardStatus } from '../repositories/accountRepo';
+import { createTransaction, validateTransactionInput } from '../models/transactionModel.js';
+import { debitAndRecordTransaction, getMonthlyCo2Usage, updateCardStatus } from '../repositories/accountRepo.js';
 async function processTransaction(body, idempotencyKey) {
     // Validate the transaction data
     validateTransactionInput(body);
 
-    const { cardId, userId, amount, merchantId, mcc, posDeviceId } = body;
+    const { cardId, userId, amount, currency, merchantId, mcc, posDeviceId } = body;
 
     const co2Amount = await calculateCO2(amount, mcc);
-    const transaction = await createTransaction(cardId, userId, amount, merchantId, mcc, posDeviceId);
+    const transaction = createTransaction(cardId, userId, amount, currency, merchantId, mcc, posDeviceId);
     transaction.co2Amount = co2Amount;
     transaction.status = 'APPROVED';
 
@@ -37,6 +36,7 @@ async function processTransaction(body, idempotencyKey) {
         transactionId: transaction.transactionId,
         transactionStatus: transaction.status,
         amount: transaction.amount,
+        currency: transaction.currency,
         co2Amount: transaction.co2Amount,
         carbonQuotaRemaining:  Number((config.carbonQuotaLimitKg - monthlyCo2Usage.totalCo2Kg).toFixed(2)),
         processedAt: transaction.createdAt,

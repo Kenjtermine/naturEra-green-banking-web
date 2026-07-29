@@ -4,7 +4,7 @@ Description: Green Banking Backend for NaturEra
 
 Globals:
   Function:
-    Runtime: nodejs20.x
+    Runtime: nodejs24.x
     Timeout: 10
     MemorySize: 256
     Environment:
@@ -18,6 +18,104 @@ Globals:
         # đổi từ 500/250 hay bị lệch ngoài ý muốn.
 
 Resources:
+  # COGNITO USER POOL (Ngôi nhà chung cho User, Staff, Admin)
+  GreenBankingUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: GreenBanking-MVP-Pool
+      # Đăng nhập bằng Email
+      UsernameAttributes: [email]
+      # Tự động gửi mã OTP về email khi đăng ký
+      AutoVerifiedAttributes: [email]
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+      Schema:
+        - Name: name
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+        # 💡 TỬ HUYỆT PHÂN QUYỀN: Tạo Custom Attribute để chứa Role
+        - Name: role
+          AttributeDataType: String
+          Required: false
+          Mutable: true # Bật Mutable để Admin có quyền update sau này
+  # User Pool Client: Khởi tạo cho Frontend Web
+  GreenBankingUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: GreenBanking-Web-Client
+      UserPoolId: !Ref GreenBankingUserPool
+      
+      # QUY TẮC SỐ 1: BẮT BUỘC FALSE cho Frontend Web (React/Vue/Angular)
+      # Vì mã nguồn frontend ai cũng xem được, không thể giấu Secret Key.
+      GenerateSecret: false 
+      
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+
+      # QUY TẮC SỐ 2: BẢO MẬT RBAC (Role-Based Access Control)
+      ReadAttributes:
+        - email
+        - name
+        - custom:role # Frontend ĐƯỢC PHÉP ĐỌC để biết đang là User hay Admin để hiện UI
+      
+      WriteAttributes:
+        - email
+        - name
+        # KHÔNG CÓ 'custom:role' Ở ĐÂY. 
+        # Khi Frontend gọi hàm signUp() của thư viện aws-amplify mà cố tình 
+        # nhét custom:role="ADMIN" vào, Cognito sẽ lập tức ném lỗi cấm truy cập!
+  GreenBankingApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: v1
+      Cors: 
+        AllowOrigin: "'*'" # MVP tạm để *, lên Prod sửa thành URL CloudFront
+        AllowHeaders: "'Content-Type,Authorization,X-Api-Key'"
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        AddDefaultAuthorizerToCorsPreflight: false
+        AddApiKeyRequiredToCorsPreflight: false
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt GreenBankingUserPool.Arn
+
+  # (Tạo API Key dùng cho máy quẹt thẻ POS của Merchant)
+  PosApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+      Name: PosSimulatorKey
+      Enabled: true
+
+  PosUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    DependsOn: GreenBankingApiv1Stage
+    Properties:
+      UsagePlanName: !Sub "${AWS::StackName}-pos-usage-plan"
+      Description: Usage plan for POS simulator machine-to-machine calls
+      ApiStages:
+        - ApiId: !Ref GreenBankingApi
+          Stage: v1
+      Throttle:
+        BurstLimit: 20
+        RateLimit: 10
+      Quota:
+        Limit: 10000
+        Period: MONTH
+
+  PosUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref PosApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref PosUsagePlan
+
+  #==============================================================================
+
   NaturEraGreenBankingTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -82,13 +180,19 @@ Resources:
   TransactionInterceptor:
     Type: AWS::Serverless::Function
     Properties:
+      CodeUri: .
       Handler: src/functions/transaction-interceptor/Lambda.handler
       Events:
-        ApiEvent:
+        ProcessTxn:
           Type: Api
-          Properties:
-            Path: /v1/transactions
-            Method: post
+          Properties: 
+            RestApiId: !Ref GreenBankingApi
+            Path: /transactions
+            Method: POST
+            Auth:
+              Authorizer: NONE
+              ApiKeyRequired: true
+
       Policies:
         - Statement:
             - Sid: LeastPrivilegeUserAndConfigAccess
@@ -105,10 +209,80 @@ Resources:
                     - "USER#*"
                     - "CONFIG#*"
 
+  # Dashboard API: Lấy thông tin thống kê + giao dịch gần nhất của user
+  DashboardApi:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: src/functions/dashboard-api/Lambda.handler
+      Events:
+        GetDashboard:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GreenBankingApi
+            Path: /dashboard
+            Method: get
+      Policies:
+        - Statement:
+            - Sid: DashboardReadOnlyAccess
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+              Resource: !GetAtt NaturEraGreenBankingTable.Arn
+              Condition:
+                "ForAllValues:StringLike":
+                  dynamodb:LeadingKeys:
+                    - "USER#*"
+
+  AdminRuleConfigApi:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: src/functions/admin-rule-config-api/Lambda.handler
+      Events:
+        GetCo2Rules:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GreenBankingApi
+            Path: /admin/config/co2-rules
+            Method: get
+        PutCo2Rules:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GreenBankingApi
+            Path: /admin/config/co2-rules
+            Method: put
+        GetMccMapping:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GreenBankingApi
+            Path: /admin/config/mcc-mapping
+            Method: get
+        PutMccMapping:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GreenBankingApi
+            Path: /admin/config/mcc-mapping
+            Method: put
+      Policies:
+        - Statement:
+            - Sid: AdminConfigAccess
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+              Resource: !GetAtt NaturEraGreenBankingTable.Arn
+              Condition:
+                "ForAllValues:StringLike":
+                  dynamodb:LeadingKeys:
+                    - "CONFIG#*"
+
   # Monthly Batch Job: Mở khóa thẻ + tặng thưởng users dưới quota
   MonthlyOffsetBatch:
     Type: AWS::Serverless::Function
     Properties:
+      CodeUri: .
       Handler: src/functions/monthly-offset-batch/Lambda.handler
       Timeout: 300 # 5 phút cho tác vụ batch
       MemorySize: 512
@@ -135,6 +309,80 @@ Resources:
                 "ForAllValues:StringLike":
                   dynamodb:LeadingKeys:
                     - "USER#*"
+                    - "STAT#*"
+                    - "true"
+  # Frontend Hosting (S3 + CloudFront)
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+
+  # OAC (Origin Access Control): Giấy thông hành bảo mật thế hệ mới
+  # Cho phép CloudFront được lấy file từ S3 riêng tư
+  CloudFrontOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${AWS::StackName}-OAC"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+  # Cấp quyền cho S3 chấp nhận giấy thông hành OAC từ CloudFront
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${FrontendBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
+  # CloudFront Distribution
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html # Tự động load file này khi vào trang chủ
+        Origins:
+          - DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            Id: FrontendS3Origin
+            OriginAccessControlId: !GetAtt CloudFrontOriginAccessControl.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          TargetOriginId: FrontendS3Origin
+          ViewerProtocolPolicy: redirect-to-https # Ép dùng HTTPS
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+        
+        # 💡 TỬ HUYỆT CỦA REACT/VITE (SPA): Đánh lừa CloudFront
+        # Khi user F5 ở trang /dashboard, S3 sẽ báo lỗi 404 vì nó không có thư mục /dashboard
+        # Khai báo này ép CloudFront trả về trang chủ index.html (200 OK) để React Router tự điều hướng
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
 
 Parameters:
   TableNameParam:
@@ -149,11 +397,23 @@ Outputs:
     Export:
       Name: !Sub "${AWS::StackName}-TransactionInterceptor"
 
+  DashboardApiFunctionArn:
+    Description: ARN của Dashboard API Lambda
+    Value: !GetAtt DashboardApi.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-DashboardApi"
+
   MonthlyOffsetBatchFunctionArn:
     Description: ARN của Monthly Offset Batch Lambda
     Value: !GetAtt MonthlyOffsetBatch.Arn
     Export:
       Name: !Sub "${AWS::StackName}-MonthlyOffsetBatch"
+
+  AdminRuleConfigApiFunctionArn:
+    Description: ARN cua Admin Rule Config API Lambda
+    Value: !GetAtt AdminRuleConfigApi.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-AdminRuleConfigApi"
 
   DynamoDBTableArn:
     Description: ARN của DynamoDB table
@@ -167,10 +427,31 @@ Outputs:
     Export:
       Name: !Sub "${AWS::StackName}-DynamoDBTableName"
 
+  # ApiEndpoint:
+  #   Description: API Gateway endpoint
+  #   # SỬA: ServerlessApi -> ServerlessRestApi (logical ID mặc định thật của SAM
+  #   # cho API Gateway ẩn — không tự đặt tên khác được, đây là tên cố định)
+  #   Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/v1"
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ApiEndpoint"
   ApiEndpoint:
-    Description: API Gateway endpoint
-    # SỬA: ServerlessApi -> ServerlessRestApi (logical ID mặc định thật của SAM
-    # cho API Gateway ẩn — không tự đặt tên khác được, đây là tên cố định)
-    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/v1"
-    Export:
-      Name: !Sub "${AWS::StackName}-ApiEndpoint"
+    Description: "Base URL cho Frontend gọi API"
+    Value: !Sub "https://${GreenBankingApi}.execute-api.${AWS::Region}.amazonaws.com/v1"
+  FrontendUserPoolId:
+    Description: "Copy vào VITE_COGNITO_USER_POOL_ID"
+    Value: !Ref GreenBankingUserPool
+  FrontendClientId:
+    Description: "Copy vào VITE_COGNITO_CLIENT_ID"
+    Value: !Ref GreenBankingUserPoolClient
+  MerchantApiKey:
+    Description: "API Gateway API key ID. Use aws apigateway get-api-key --api-key <id> --include-value to get x-api-key value."
+    Value: !Ref PosApiKey
+  PosUsagePlanId:
+    Description: "Usage plan attached to the POS simulator API key"
+    Value: !Ref PosUsagePlan
+  FrontendBucketName:
+    Description: "S3 bucket for React/Vite dist assets"
+    Value: !Ref FrontendBucket
+  FrontendCloudFrontUrl:
+    Description: "CloudFront URL for the frontend"
+    Value: !Sub "https://${CloudFrontDistribution.DomainName}"

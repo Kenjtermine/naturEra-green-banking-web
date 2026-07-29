@@ -1,7 +1,9 @@
 {
-  "userId": "USR12345",
-  "transactionId": "TXN998877",
+  "cardId": "card_001",
+  "userId": "demo-user-001",
   "amount": 55000,
-  "merchantCategory": "COFFEE_SHOP",
-  "currency": "VND"
+  "currency": "VND",
+  "merchantId": "highlands_001",
+  "mcc": "5814",
+  "posDeviceId": "pos_hcm_001"
 }

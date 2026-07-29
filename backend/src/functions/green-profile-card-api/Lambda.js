@@ -1,17 +1,26 @@
-const { withErrorHandling } = require('../../middlewares/errorHandler');
-const { getGreenProfile } = require('../../services/greenProfileService');
+// const { withErrorHandling } = require('../../middlewares/errorHandler');
+// const { getGreenProfile } = require('../../services/greenProfileService');
+import getGreenProfile from '../../services/greenProfileService.js'; // viết chuẩn ESM
 
 async function GreenProfileHandler(event) {
-    const userId = (event.queryStringParameters && event.queryStringParameters.userId) || "USR12345";
+    try {
+        const requestId = event.pathParameters.requestId;
 
-    // Gọi Service
-    const result = await getGreenProfile(userId);
+        const claims = event.requestContext.authorizer.claims;
+        const callerId = claims.sub;
+        const callerRole = claims['custom:role'] || 'USER';
 
-    // Trả JSON về
-    return {
-        statusCode: 200,
-        body: JSON.stringify(result),
-    };
+        // 2. Gọi Service
+        const result = await getGreenProfile(requestId, callerId, callerRole);
+
+        // 3. Trả JSON về
+        return {
+            statusCode: 200,
+            body: JSON.stringify(result),
+        };
+    } catch (err) {
+        return { statusCode: err.statusCode || 500, body: JSON.stringify({ message: err.message }) };
+    }
 }
 
-exports.handler = withErrorHandling(GreenProfileHandler);
+export const handler = GreenProfileHandler;
