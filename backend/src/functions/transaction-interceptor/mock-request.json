@@ -1,0 +1,9 @@
+{
+  "cardId": "card_001",
+  "userId": "demo-user-001",
+  "amount": 55000,
+  "currency": "VND",
+  "merchantId": "highlands_001",
+  "mcc": "5814",
+  "posDeviceId": "pos_hcm_001"
+}
