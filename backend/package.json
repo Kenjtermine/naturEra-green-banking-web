@@ -1,0 +1,15 @@
+{
+  "name": "naturera-green-banking-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "sam build",
+    "seed": "node scripts/seed-data.js",
+    "validate": "sam validate --config-env no-such-env && sam validate --lint"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.922.0",
+    "@aws-sdk/lib-dynamodb": "^3.922.0"
+  }
+}
