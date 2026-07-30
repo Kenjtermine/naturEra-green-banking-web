@@ -136,7 +136,7 @@ const ApiService = {
     }
 
     // ── THẬT: gọi API Gateway ──
-    const res = await fetch(`${API_URL}/transactions/transfer`, {
+    const res = await fetch(`${API_URL}/transactions`, {
       method  : "POST",
       headers : {
         "Content-Type"  : "application/json",
