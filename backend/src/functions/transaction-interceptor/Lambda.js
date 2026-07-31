@@ -1,5 +1,12 @@
 import processTransaction from '../../services/transactionService.js';
 
+// KHAI BÁO SẴN HEADER CORS Ở ĐÂY
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
+  "Access-Control-Allow-Methods": "OPTIONS,POST"
+};
+
 export const handler = async (event) => {
   console.log('[TransactionInterceptor] Event:', JSON.stringify(event));
 
@@ -13,6 +20,7 @@ export const handler = async (event) => {
 
     return {
       statusCode: 200,
+      headers: corsHeaders, // <--- ĐÃ BỔ SUNG Ở ĐÂY
       body: JSON.stringify(result),
     };
   } catch (err) {
@@ -26,6 +34,7 @@ export const handler = async (event) => {
 
     return {
       statusCode: err.statusCode || 500,
+      headers: corsHeaders, // <--- ĐÃ BỔ SUNG Ở ĐÂY
       body: JSON.stringify({
         errorCode: err.errorCode || 'INTERNAL_ERROR',
         message: err.message || 'Internal server error',
