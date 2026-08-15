@@ -2,7 +2,7 @@
 // ║  apiService.js — Toàn bộ HTTP calls tập trung ở đây             ║
 // ║  Mỗi hàm: mock mode khi IS_MOCK=true, gọi thật khi có API URL   ║
 // ╚══════════════════════════════════════════════════════════════════╝
-import { ENDPOINTS, COGNITO_CONFIG, IS_MOCK } from "./config.js";
+import { ENDPOINTS, COGNITO_CONFIG, IS_MOCK, MERCHANT_API_KEY } from "./config.js";
 
 // ─── Helper: build Authorization header ───────────────────────────
 function authHeader(jwtToken) {
@@ -65,12 +65,27 @@ export const CognitoAuth = {
     const res = await fetch(COGNITO_CONFIG.endpoint, {
       method  : "POST",
       headers : { "Content-Type":"application/x-amz-json-1.1", "X-Amz-Target" : "AWSCognitoIdentityProviderService.SignUp" },
-      body    : JSON.stringify({ ClientId:COGNITO_CONFIG.clientId, Username:username, Password:password, UserAttributes:[{Name:"email",Value:email}] }),
+      body    : JSON.stringify({ ClientId:COGNITO_CONFIG.clientId, Username:username, Password:password, UserAttributes:[{Name:"email",Value:email}, {Name: "name", Value: username}] }),
     });
     if (!res.ok) { const e = await res.json(); throw new Error(e.message); }
     return res.json();
   },
 
+  async confirmSignUp(username, code) {
+    if (IS_MOCK) { await delay(800); return true; }
+    
+    const res = await fetch(COGNITO_CONFIG.endpoint, {
+      method  : "POST",
+      headers : { "Content-Type":"application/x-amz-json-1.1", "X-Amz-Target" : "AWSCognitoIdentityProviderService.ConfirmSignUp" },
+      body    : JSON.stringify({ 
+        ClientId: COGNITO_CONFIG.clientId, 
+        Username: username, 
+        ConfirmationCode: code 
+      }),
+    });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.message || "Mã xác nhận không đúng"); }
+    return res.json();
+  },
   signOut() {
     sessionStorage.removeItem("naturera_jwt");
   },
@@ -79,6 +94,26 @@ export const CognitoAuth = {
 // ══════════════════════════════════════════════════════════════════
 //  CUSTOMER API — Read-only (Customer Portal)
 // ══════════════════════════════════════════════════════════════════
+
+/**
+ * GET /users/{userId}/profile
+ * Trả về: { userId, fullName, email, balance, currency, createdAt, updatedAt }
+ */
+export async function fetchCustomerProfile(userId, jwtToken) {
+  if (IS_MOCK) {
+    await delay(400);
+    return {
+      userId,
+      fullName: "NaturEra Demo User",
+      email: "demo@naturera.local",
+      balance: 10_000_000,
+      currency: "VND",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+  return handleResponse(await fetch(ENDPOINTS.getProfile(userId), { headers: authHeader(jwtToken) }));
+}
 
 /**
  * GET /accounts/{cardId}/balance
@@ -93,10 +128,10 @@ export async function fetchBalance(cardId, jwtToken) {
 }
 
 /**
- * GET /accounts/{cardId}/transactions?limit=20&offset=0
+ * GET /users/{userId}/transactions?limit=20&offset=0
  * Trả về: { items: [{ transaction_id, timestamp, type, amount, merchant_name, mcc, co2_estimate, description }], total }
  */
-export async function fetchTransactions(cardId, jwtToken, { limit = 20, offset = 0 } = {}) {
+export async function fetchTransactions(userId, jwtToken, { limit = 20, offset = 0 } = {}) {
   if (IS_MOCK) {
     await delay(700);
     return {
@@ -104,7 +139,7 @@ export async function fetchTransactions(cardId, jwtToken, { limit = 20, offset =
       items: MOCK_TRANSACTIONS,
     };
   }
-  const url = `${ENDPOINTS.getTransactions(cardId)}?limit=${limit}&offset=${offset}`;
+  const url = `${ENDPOINTS.getTransactions(userId)}?limit=${limit}&offset=${offset}`;
   return handleResponse(await fetch(url, { headers: authHeader(jwtToken) }));
 }
 
@@ -135,7 +170,7 @@ export async function fetchCarbonCredit(userId, jwtToken) {
  * Body: { card_id, amount, merchant_id, mcc, description }
  * Trả về: { transaction_id, co2_estimate, new_balance, status, message }
  */
-export async function postPosTransaction({ cardId, amount, merchantId, mcc, description }, jwtToken) {
+export async function postPosTransaction({ cardId, userId, amount, merchantId, mcc, description }, jwtToken) {
   if (IS_MOCK) {
     await delay(1400);
     if (Math.random() < 0.08) throw new Error("Lambda timeout (simulated). Retry.");
@@ -150,8 +185,21 @@ export async function postPosTransaction({ cardId, amount, merchantId, mcc, desc
   return handleResponse(
     await fetch(ENDPOINTS.postTransaction, {
       method  : "POST",
-      headers : authHeader(jwtToken),
-      body    : JSON.stringify({ card_id: cardId, amount, merchant_id: merchantId, mcc, description }),
+      headers : {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${jwtToken}`,
+        "x-api-key": MERCHANT_API_KEY
+      },
+      body    : JSON.stringify({
+        cardId,
+        userId,
+        amount,
+        currency: "VND",
+        merchantId,
+        mcc,
+        description,
+        posDeviceId: "pos_device_01",
+      }),
     })
   );
 }

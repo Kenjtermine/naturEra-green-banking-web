@@ -4,19 +4,28 @@
 // ╚══════════════════════════════════════════════════════════════════╝
 
 // ─── 1. API Gateway (Serverless Backend) ──────────────────────────
-// Điền URL sau khi chạy: serverless deploy / sam deploy
-export const API_BASE_URL = "https://qbrpn8bm0b.execute-api.ap-southeast-2.amazonaws.com/Stage";
-// Ví dụ: "https://abc123.execute-api.ap-southeast-1.amazonaws.com/prod"
+// Ưu tiên env `VITE_API_BASE_URL`. Nếu không có, dev mặc định trỏ local SAM,
+// còn build production mới dùng endpoint deployed để không ảnh hưởng production.
+const LOCAL_API_BASE_URL = "http://127.0.0.1:3001";
+const PROD_API_BASE_URL  = "https://qbrpn8bm0b.execute-api.ap-southeast-2.amazonaws.com/v1";
+
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
+  ?? (import.meta.env.DEV ? LOCAL_API_BASE_URL : PROD_API_BASE_URL);
+// Ví dụ: "https://abc123.execute-api.ap-southeast-1.amazonaws.com/v1"
 
 // Endpoint map — đồng bộ với serverless.yml / template.yaml của Backend
 export const ENDPOINTS = {
   // ── Customer (read-only) ──────────────────────────────────────
-  getBalance     : (cardId) => `${API_BASE_URL}/accounts/${cardId}/balance`,
-  //  GET /accounts/{cardId}/balance
-  //  Response: { card_id, balance, currency, updated_at }
+  getProfile     : (userId) => `${API_BASE_URL}/users/${userId}/profile`,
+  //  GET /users/{userId}/profile
+  //  Response: { userId, fullName, email, balance, currency, createdAt, updatedAt }
 
-  getTransactions: (cardId) => `${API_BASE_URL}/accounts/${cardId}/transactions`,
-  //  GET /accounts/{cardId}/transactions?limit=20&offset=0
+  getBalance     : (userId) => `${API_BASE_URL}/users/${userId}/profile`,
+  //  GET /users/{userId}/profile
+  //  Response: { userId, fullName, email, balance, currency, createdAt, updatedAt, cardId }
+
+  getTransactions: (userId) => `${API_BASE_URL}/users/${userId}/transactions`,
+  //  GET /users/{userId}/transactions?limit=20&offset=0
   //  Response: { items: [...], total, limit, offset }
 
   getCarbonCredit: (userId) => `${API_BASE_URL}/users/${userId}/carbon-credits`,
@@ -42,3 +51,4 @@ export const COGNITO_CONFIG = {
 
 // ─── 3. Feature flags ──────────────────────────────────────────────
 export const IS_MOCK = false;
+export const MERCHANT_API_KEY = import.meta.env.VITE_MERCHANT_API_KEY || "";

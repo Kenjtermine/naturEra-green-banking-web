@@ -23,7 +23,7 @@ import {
   Banknote, Building2, Hash,
 } from "lucide-react";
 
-import { CognitoAuth, fetchBalance, fetchTransactions, fetchCarbonCredit, postPosTransaction, MOCK_ECO_MONTHLY } from "./apiService.js";
+import { CognitoAuth, fetchBalance, fetchTransactions, fetchCarbonCredit, fetchCustomerProfile, postPosTransaction, MOCK_ECO_MONTHLY } from "./apiService.js";
 import { IS_MOCK } from "./config.js";
 
 // ══════════════════════════════════════════════════════════════════
@@ -91,6 +91,7 @@ function SectionHeader({ icon, title, right }) {
 // ══════════════════════════════════════════════════════════════════
 function AuthPage({ onAuthSuccess }) {
   const [mode,     setMode]     = useState("login");
+  // const [username, setUsername] = useState("");
   const [email,    setEmail]    = useState("");
   const [password, setPassword] = useState("");
   const [confirm,  setConfirm]  = useState("");
@@ -98,20 +99,39 @@ function AuthPage({ onAuthSuccess }) {
   const [loading,  setLoading]  = useState(false);
   const [error,    setError]    = useState("");
   const [success,  setSuccess]  = useState("");
+  const [otp,      setOtp]      = useState("");
 
   async function handleSubmit() {
     setError(""); setSuccess("");
-    if (!email || !password) { setError("Vui lòng điền đầy đủ thông tin."); return; }
-    if (mode === "register" && password !== confirm) { setError("Mật khẩu xác nhận không khớp."); return; }
+    
+    // Kiểm tra rỗng tùy theo mode
+    if (mode !== "otp" && (!email || !password)) { 
+      setError("Vui lòng điền đầy đủ thông tin."); return; 
+    }
+    if (mode === "otp" && !otp) {
+      setError("Vui lòng nhập mã OTP."); return;
+    }
+    if (mode === "register" && password !== confirm) { 
+      setError("Mật khẩu xác nhận không khớp."); return; 
+    }
+    
     setLoading(true);
     try {
       if (mode === "login") {
         const tokens = await CognitoAuth.signIn(email, password);
         sessionStorage.setItem("naturera_jwt", tokens.idToken);
         onAuthSuccess(tokens.idToken);
-      } else {
-        await CognitoAuth.signUp(email, password, email);
+      } 
+      else if (mode === "register") {
+        const cleanEmail = email.trim();
+        await CognitoAuth.signUp(cleanEmail, password, cleanEmail);
         setSuccess("Đăng ký thành công! Kiểm tra email để xác thực, sau đó đăng nhập.");
+        setMode("otp"); //
+      }
+      else if (mode === "otp") { 
+        const cleanUsername = email.trim();
+        await CognitoAuth.confirmSignUp(cleanUsername, otp);
+        setSuccess("Nhập mã xác nhận thành công! Giờ bạn có thể đăng nhập.");
         setMode("login");
       }
     } catch (e) {
@@ -145,35 +165,56 @@ function AuthPage({ onAuthSuccess }) {
             ))}
           </div>
           <div className="space-y-4">
-            <InputField icon={<Mail size={16} />} type="email" placeholder="khoa@naturera.green"
-              value={email} onChange={e => setEmail(e.target.value)} onEnter={handleSubmit} />
-            <InputField icon={<Lock size={16} />} type={showPw ? "text" : "password"} placeholder="••••••••"
-              value={password} onChange={e => setPassword(e.target.value)} onEnter={handleSubmit}
-              right={
-                <button onClick={() => setShowPw(p => !p)} className="text-gray-400 hover:text-gray-600">
-                  {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              } />
-            {mode === "register" && (
-              <InputField icon={<Lock size={16} />} type={showPw ? "text" : "password"} placeholder="Xác nhận mật khẩu"
-                value={confirm} onChange={e => setConfirm(e.target.value)} />
+            {/* Nếu KHÔNG PHẢI mode OTP thì hiện form Đăng nhập/Đăng ký */}
+            {mode !== "otp" ? (
+              <>
+                {/* <InputField  type="text" placeholder="Họ và tên"
+                  value={fullname} onChange={e => setFullname(e.target.value)} onEnter={handleSubmit} /> */}
+                <InputField icon={<Mail size={16} />} type="email" placeholder="khoa@naturera.green"
+                  value={email} onChange={e => setEmail(e.target.value)} onEnter={handleSubmit} />
+                <InputField icon={<Lock size={16} />} type={showPw ? "text" : "password"} placeholder="••••••••"
+                  value={password} onChange={e => setPassword(e.target.value)} onEnter={handleSubmit}
+                  right={ /* ... nút hiện ẩn password ... */ 
+                    <button onClick={() => setShowPw(p => !p)} className="text-gray-400 hover:text-gray-600">
+                      {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  }/>
+                {mode === "register" && (
+                  <InputField icon={<Lock size={16} />} type={showPw ? "text" : "password"} placeholder="Xác nhận mật khẩu"
+                    value={confirm} onChange={e => setConfirm(e.target.value)} />
+                )}
+              </>
+            ) : (
+              /* NẾU LÀ MODE OTP THÌ HIỆN FORM NÀY */
+              <div className="animate-fade-in">
+                <p className="text-sm text-gray-600 mb-4 text-center">
+                  Mã xác nhận gồm 6 số đã được gửi tới <b>{email}</b>.
+                </p>
+                <InputField icon={<KeyRound size={16} />} type="text" placeholder="Nhập mã OTP..."
+                  value={otp} onChange={e => setOtp(e.target.value)} onEnter={handleSubmit} />
+              </div>
             )}
+
             {error   && <AlertBox type="error">{error}</AlertBox>}
             {success && <AlertBox type="success">{success}</AlertBox>}
+            
             <button onClick={handleSubmit} disabled={loading}
-              className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 text-white font-bold text-sm py-3 rounded-xl transition-colors mt-2">
+              className="w-full flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm py-3 rounded-xl transition-colors mt-2">
               {loading ? <Spinner size={17} /> : <KeyRound size={17} />}
-              {loading ? "Đang xác thực…" : mode === "login" ? "Đăng nhập" : "Tạo tài khoản"}
+              {/* ĐỔI TEXT NÚT BẤM THEO MODE */}
+              {loading ? "Đang xử lý…" : mode === "login" ? "Đăng nhập" : mode === "register" ? "Tạo tài khoản" : "Xác thực tài khoản"}
             </button>
+            
+            {/* Nút quay lại login nếu đang ở màn hình OTP */}
+            {mode === "otp" && (
+              <button onClick={() => setMode("login")} className="w-full text-sm text-emerald-600 hover:underline mt-2">
+                Quay lại đăng nhập
+              </button>
+            )}
           </div>
-          {IS_MOCK && (
-            <div className="mt-5 p-3 bg-emerald-50 rounded-xl border border-emerald-100">
-              <p className="text-xs text-emerald-700 text-center">
-                <span className="font-semibold">Demo:</span> Nhập bất kỳ email + mật khẩu ≥ 4 ký tự
-              </p>
-            </div>
-          )}
         </div>
+
+        
         <p className="text-center text-xs text-emerald-300 mt-6">Bảo mật bởi AWS Cognito · TLS 1.3 · MFA Ready</p>
       </div>
     </div>
@@ -203,19 +244,34 @@ function AlertBox({ type, children }) {
 }
 
 // ══════════════════════════════════════════════════════════════════
-//  💳  BALANCE CARD  — GET /accounts/{cardId}/balance
-// ══════════════════════════════════════════════════════════════════
-function BalanceCard({ cardId, jwtToken }) {
+//  💳  BALANCE CARD  — ưu tiên lấy từ customer profile.
+//  Nếu profile chưa sẵn sàng, fallback về /accounts/{cardId}/balance
+// ══════════════════════════════════════════════════════════
+function BalanceCard({ userId, cardId, jwtToken }) {
   const [data,    setData]    = useState(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
-    try { setData(await fetchBalance(cardId, jwtToken)); }
-    catch (e) { setError(e.message); }
-    finally { setLoading(false); }
-  }, [cardId, jwtToken]);
+    try {
+      const profile = await fetchCustomerProfile(userId, jwtToken);
+      setData({
+        balance: profile.balance,
+        currency: profile.currency,
+        updated_at: profile.updatedAt,
+        card_id: cardId,
+      });
+    } catch (e) {
+      try {
+        setData(await fetchBalance(cardId, jwtToken));
+      } catch (fallbackErr) {
+        setError(fallbackErr.message || e.message);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [userId, cardId, jwtToken]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -320,9 +376,9 @@ function MiniBarChart({ data }) {
 }
 
 // ══════════════════════════════════════════════════════════════════
-//  📋  TRANSACTION HISTORY  — GET /accounts/{cardId}/transactions
+//  📋  TRANSACTION HISTORY  — GET /users/{userId}/transactions
 // ══════════════════════════════════════════════════════════════════
-function TransactionHistory({ cardId, jwtToken }) {
+function TransactionHistory({ userId, jwtToken }) {
   const [data,    setData]    = useState({ items: [], total: 0 });
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState(null);
@@ -332,12 +388,12 @@ function TransactionHistory({ cardId, jwtToken }) {
   const load = useCallback(async (p = 0) => {
     setLoading(true); setError(null);
     try {
-      const res = await fetchTransactions(cardId, jwtToken, { limit: PAGE_SIZE, offset: p * PAGE_SIZE });
+      const res = await fetchTransactions(userId, jwtToken, { limit: PAGE_SIZE, offset: p * PAGE_SIZE });
       setData(res);
       setPage(p);
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
-  }, [cardId, jwtToken]);
+  }, [userId, jwtToken]);
 
   useEffect(() => { load(0); }, [load]);
 
@@ -523,7 +579,7 @@ function CloudWatchSection() {
 //  🏪  MOCK POS SCREEN — Công cụ test nội bộ (không hiển thị mặc định)
 //  Mô phỏng máy POS tại cửa hàng gửi POST /transactions lên Backend
 // ══════════════════════════════════════════════════════════════════
-function MockPosScreen({ cardId, jwtToken, onClose }) {
+function MockPosScreen({ cardId, userId, jwtToken, onClose }) {
   const [form, setForm]       = useState({ amount: "", merchantId: "", mcc: "5999", description: "" });
   const [loading, setLoading] = useState(false);
   const [result, setResult]   = useState(null);
@@ -535,6 +591,7 @@ function MockPosScreen({ cardId, jwtToken, onClose }) {
     try {
       const res = await postPosTransaction({
         cardId,
+        userId,
         amount     : +form.amount,
         merchantId : form.merchantId,
         mcc        : form.mcc,
@@ -546,11 +603,14 @@ function MockPosScreen({ cardId, jwtToken, onClose }) {
   }
 
   const payload = {
-    card_id    : cardId,
+    cardId,
+    userId,
     amount     : +form.amount || 0,
-    merchant_id: form.merchantId || "merchant_xxx",
+    merchantId : form.merchantId || "merchant_xxx",
     mcc        : form.mcc,
+    currency   : "VND",
     description: form.description || "POS Transaction",
+    posDeviceId: "pos_device_01",
   };
 
   return (
@@ -636,16 +696,34 @@ function PosField({ label, icon, type = "text", placeholder, value, onChange }) 
 // ══════════════════════════════════════════════════════════════════
 //  🏦  CUSTOMER PORTAL (main dashboard — read-only)
 // ══════════════════════════════════════════════════════════════════
+function decodeJwtPayload(token) {
+  try {
+    const payload = token.split(".")[1];
+    return JSON.parse(atob(payload));
+  } catch {
+    return {};
+  }
+}
+
 function CustomerPortal({ jwtToken, onSignOut }) {
-  // User info lấy từ JWT hoặc mock
+  const claims = decodeJwtPayload(jwtToken);
   const user = {
-    userId : "c9feb4a8-8021-70d2-c35f-e4a6ccbd687d",
-    cardId : "card_001",
-    name   : "NaturEra Demo User",
+    userId : claims.sub || claims["custom:userId"] || claims["cognito:username"] || "demo-user-001",
+    name   : claims.name || claims.email || "NaturEra User",
   };
 
   const [showPos, setShowPos] = useState(false);
   const [toast,   setToast]   = useState(null);
+  const [profile, setProfile] = useState(null);
+
+  useEffect(() => {
+    fetchCustomerProfile(user.userId, jwtToken)
+      .then((data) => setProfile(data))
+      .catch((err) => console.error("Failed to load customer profile:", err));
+  }, [user.userId, jwtToken]);
+
+  const displayName = profile?.fullName || user.name;
+  const activeCardId = profile?.cardId || "card_001";
 
   function showToast(msg, type = "success") {
     setToast({ msg, type });
@@ -657,7 +735,8 @@ function CustomerPortal({ jwtToken, onSignOut }) {
       {toast && <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
       {showPos && (
         <MockPosScreen
-          cardId={user.cardId}
+          cardId={activeCardId}
+          userId={user.userId}
           jwtToken={jwtToken}
           onClose={() => setShowPos(false)}
         />
@@ -698,7 +777,7 @@ function CustomerPortal({ jwtToken, onSignOut }) {
             <div className="w-6 h-6 bg-emerald-400 rounded-full flex items-center justify-center">
               <User size={13} className="text-white" />
             </div>
-            <span className="text-sm font-medium hidden sm:inline">{user.name}</span>
+            <span className="text-sm font-medium hidden sm:inline">{displayName}</span>
           </div>
           <button onClick={onSignOut} className="flex items-center gap-1.5 text-emerald-200 hover:text-white text-sm transition-colors">
             <LogOut size={16} />
@@ -713,7 +792,7 @@ function CustomerPortal({ jwtToken, onSignOut }) {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* Balance chiếm 2 cột trên mobile = full width, trên md = 2/3 */}
           <div className="md:col-span-2">
-            <BalanceCard cardId={user.cardId} jwtToken={jwtToken} />
+            <BalanceCard userId={user.userId} cardId={activeCardId} jwtToken={jwtToken} />
           </div>
           <div>
             <CarbonCreditCard userId={user.userId} jwtToken={jwtToken} />
@@ -721,14 +800,14 @@ function CustomerPortal({ jwtToken, onSignOut }) {
         </div>
 
         {/* ── TRANSACTION HISTORY ── */}
-        <TransactionHistory cardId={user.cardId} jwtToken={jwtToken} />
+        <TransactionHistory userId={user.userId} jwtToken={jwtToken} />
 
         {/* ── CLOUDWATCH ── */}
         <CloudWatchSection />
 
         {/* ── FOOTER ── */}
         <footer className="text-center text-xs text-gray-300 pb-4 space-y-1">
-          <p>NaturEra Green Banking · {user.userId} · Bảo vệ hành tinh từng giao dịch 🌱</p>
+          <p>NaturEra Green Banking · {displayName} · Bảo vệ hành tinh từng giao dịch 🌱</p>
           <p className="text-gray-200">Powered by AWS Lambda · API Gateway · DynamoDB · Cognito · CloudWatch</p>
         </footer>
       </main>
