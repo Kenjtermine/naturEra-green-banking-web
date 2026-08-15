@@ -1,14 +1,31 @@
 import getDashboardData from '../../services/dashboardApiService.js';
+import { getAuthClaims } from '../../utils/authClaims.js';
 
 async function handler(event) {
     try {
         // 1. Lấy thông tin từ request
-        const claims = event.requestContext?.authorizer?.claims || {};
-        const path = event.path || ""; 
+        const claims = getAuthClaims(event);
+        const path = event.path || "";
         const pathParams = event.pathParameters || {};
-        
-        // Lấy userId (từ token hoặc tham số, hoặc dùng ID thật của em dưới DB để test)
-        const userId = "demo-user-001";
+        const queryParams = event.queryStringParameters || {};
+        const httpMethod = event.httpMethod || "GET";
+
+        if (httpMethod === "OPTIONS") {
+            return {
+                statusCode: 200,
+                headers: {
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Headers": "Content-Type,Authorization,X-Api-Key,X-Amz-Date,X-Amz-Security-Token",
+                    "Access-Control-Allow-Methods": "GET,POST,PUT,OPTIONS"
+                },
+                body: ""
+            };
+        }
+
+        // Lấy identity theo request path. Trong customer contract, path chính là nguồn thật
+        // của userId; claims chỉ dùng để xác thực và fallback khi local/test event không có path.
+        const userId = pathParams.userId || pathParams.requestId || claims.sub || claims['custom:userId'] || claims['cognito:username'] || "demo-user-001";
+        const cardId = pathParams.cardId || claims['custom:cardId'] || "card_001";
 
         // 2. Kéo toàn bộ dữ liệu từ DB lên
         const dashboardData = await getDashboardData(userId);
@@ -19,19 +36,23 @@ async function handler(event) {
         if (path.includes('/balance')) {
             // Frontend cần: { card_id, balance, currency, updated_at }
             responseBody = {
-                card_id: pathParams.cardId || "card_001",
+                card_id: cardId,
                 balance: dashboardData.balance ?? 0,
                 currency: "VND",
                 updated_at: new Date().toISOString()
             };
-        } 
+        }
         else if (path.includes('/transactions')) {
-            // Frontend cần: { items: [...], total, limit, offset }
+            const limit = Number(queryParams.limit || 20);
+            const offset = Number(queryParams.offset || 0);
+            const allItems = Array.isArray(dashboardData.transactions) ? dashboardData.transactions : [];
+            const pagedItems = allItems.slice(offset, offset + limit);
+
             responseBody = {
-                items: dashboardData.transactions || [],
-                total: dashboardData.transactions?.length || 0,
-                limit: 20,
-                offset: 0
+                items: pagedItems,
+                total: allItems.length,
+                limit,
+                offset,
             };
         } 
         else if (path.includes('/carbon-credits')) {
@@ -52,8 +73,9 @@ async function handler(event) {
         return {
             statusCode: 200,
             headers: {
-                "Access-Control-Allow-Origin": "*", 
-                "Access-Control-Allow-Credentials": true
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type,Authorization,X-Api-Key,X-Amz-Date,X-Amz-Security-Token",
+                "Access-Control-Allow-Methods": "GET,POST,PUT,OPTIONS"
             },
             body: JSON.stringify(responseBody),
         };
@@ -62,7 +84,11 @@ async function handler(event) {
         console.error("API Error:", err);
         return {
             statusCode: err.statusCode || 500,
-            headers: { "Access-Control-Allow-Origin": "*" },
+            headers: {
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type,Authorization,X-Api-Key,X-Amz-Date,X-Amz-Security-Token",
+                "Access-Control-Allow-Methods": "GET,POST,PUT,OPTIONS"
+            },
             body: JSON.stringify({
                 errorCode: err.errorCode || 'INTERNAL_ERROR',
                 message: err.message || 'Internal server error',

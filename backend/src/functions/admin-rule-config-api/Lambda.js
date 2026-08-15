@@ -4,6 +4,7 @@ import {
     updateMccMappingService,
     getMccMappingService,
 } from '../../services/adminConfigService.js';
+import { requireAuthClaims } from '../../utils/authClaims.js';
 
 /**
  * Admin Rule Config Lambda — 4 route qua 1 handler:
@@ -24,7 +25,7 @@ function respond(statusCode, payload) {
 
 async function adminConfigHandler(event) {
   try {
-    const claims = event.requestContext?.authorizer?.claims || {};
+    const claims = requireAuthClaims(event);
     const callerRole = claims['custom:role'];
     const callerId = claims['sub'];
     const path = event.resource || event.path || '';

@@ -1,11 +1,12 @@
 import AppError from '../utils/AppError.js';
-import buildDashboardResponse from '../models/dashboardModel.js';
+import buildDashboardResponse, { buildTransactionDTO } from '../models/dashboardModel.js';
 import getCategoryFromMcc from '../utils/CategoryMap.js';
 import {
     getMonthlyStat,
     getRecentTransactions,
     getTransactionsForMonth,
-    getUserProfile // <--- Đã import đúng
+    getUserProfile,
+    getUserCard,
 } from '../repositories/accountRepo.js';
 
 async function getDashboardData(userId) {
@@ -21,11 +22,12 @@ async function getDashboardData(userId) {
 
     try {
         // 3. Gọi Tầng Repo lấy dữ liệu (Chạy song song 4 hàm)
-        const [dbStat, allTxnsThisMonth, recentTxns, userProfile] = await Promise.all([
+        const [dbStat, allTxnsThisMonth, recentTxns, userProfile, userCard] = await Promise.all([
             getMonthlyStat(userId, currentMonthYyyyMm),
             getTransactionsForMonth(userId, currentMonthYyyyMm),
-            getRecentTransactions(userId, 5), // <--- Phải giữ lại hàm này
-            getUserProfile(userId)            // <--- Thêm hàm này vào cuối
+            getRecentTransactions(userId, 5),
+            getUserProfile(userId),
+            getUserCard(userId),
         ]);
 
         // 4. Tính categoryBreakdown từ TOÀN BỘ giao dịch tháng
@@ -55,7 +57,10 @@ async function getDashboardData(userId) {
 
         // 7. Gắn thêm data cho Frontend lên hình đầy đủ
         formattedResponse.balance = userProfile?.balance || 0;
-        formattedResponse.transactions = allTxnsThisMonth || [];
+        formattedResponse.cardId = userCard?.cardId || userProfile?.cardId || 'card_001';
+        formattedResponse.transactions = (allTxnsThisMonth || [])
+            .map(buildTransactionDTO)
+            .filter(Boolean);
         formattedResponse.carbonCredit = {
             total_co2_kg: dbStat?.totalCo2Kg || 0,
             green_points: dbStat?.greenPoints || 0,

@@ -192,15 +192,74 @@ async function getUserProfile(userId) {
                 SK: "PROFILE",
             },
         }));
-        if (!result.Item) {
-            throw new AppError('USER_NOT_FOUND', 'Không tìm thấy thông tin hồ sơ của người dùng', 404);
-        };
-        return result.Item;
+        // if (!result.Item) {
+        //     throw new AppError('USER_NOT_FOUND', 'Không tìm thấy thông tin hồ sơ của người dùng', 404);
+        // };
+        return result.Item || null; // Trả về null nếu không có hồ sơ, để service tự tạo mới
     } catch (err) {
         //Nếu throw AppError từ trong try, PHẢI throw lại chứ không bọc thành 500
         if (err instanceof AppError) throw err;
         console.error('Error querying user profile:', err);
         throw new AppError('FAILED_TO_QUERY_USER_PROFILE', 'Không thể lấy thông tin hồ sơ của người dùng', 500);
+    }
+}
+
+async function putUserProfile(userId, newProfileData) {
+    try {
+        const targetPK = `USER#${userId}`;
+        const itemProfile = {
+            PK: targetPK,
+            SK: "PROFILE",
+            EntityType: 'PROFILE',
+            ...newProfileData.profileData,
+        };
+        const itemStat = {
+            PK: targetPK,
+            SK: `STAT#${newProfileData.statsData.StatMonth}`,
+            EntityType: 'STAT',
+            ...newProfileData.statsData,
+        };
+        await ddbClient.send(new TransactWriteCommand({
+            TransactItems: [
+                {
+                    Put: {
+                        TableName: config.tableName,
+                        Item: itemProfile,
+                    },
+                },
+                {
+                    Put: {
+                        TableName: config.tableName,
+                        Item: itemStat,
+                    },
+                },
+            ],
+        }));
+        console.log(`User ${userId} profile updated`);
+    } catch (err) {
+        console.error('Error updating user profile:', err);
+        throw new AppError('FAILED_TO_UPDATE_USER_PROFILE', 'Không thể cập nhật thông tin hồ sơ của người dùng', 500);
+    }
+}
+
+async function getUserCard(userId) {
+    try {
+        const result = await ddbClient.send(new QueryCommand({
+            TableName: config.tableName,
+            KeyConditionExpression: 'PK = :userId AND begins_with(SK, :cardPrefix)',
+            ExpressionAttributeValues: {
+                ':userId': `USER#${userId}`,
+                ':cardPrefix': 'CARD#'
+            },
+            Limit: 1,
+            ScanIndexForward: false,
+        }));
+
+        return result.Items?.[0] || null;
+    } catch (err) {
+        if (err instanceof AppError) throw err;
+        console.error('Error querying user card:', err);
+        throw new AppError('FAILED_TO_QUERY_USER_CARD', 'Không thể lấy thông tin thẻ của người dùng', 500);
     }
 }
 
@@ -280,6 +339,8 @@ export {
     markUserRewarded,
     getMonthlyCo2Usage,
     getUserProfile,
+    putUserProfile,
+    getUserCard,
     getMonthlyStat,
     getRecentTransactions,
     getTransactionsForMonth,

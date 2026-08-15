@@ -3,12 +3,20 @@ import processTransaction from '../../services/transactionService.js';
 // KHAI BÁO SẴN HEADER CORS Ở ĐÂY
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
-  "Access-Control-Allow-Methods": "OPTIONS,POST"
+  "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,Idempotency-Key",
+  "Access-Control-Allow-Methods": "OPTIONS,POST,GET"
 };
 
 export const handler = async (event) => {
   console.log('[TransactionInterceptor] Event:', JSON.stringify(event));
+
+  if (event.httpMethod === 'OPTIONS') {
+    return {
+      statusCode: 200,
+      headers: corsHeaders,
+      body: '',
+    };
+  }
 
   try {
     const body = JSON.parse(event.body || '{}');

@@ -111,6 +111,27 @@ backend$ cd hello-world
 hello-world$ npm install
 hello-world$ npm run test
 ```
+To seed the database with demo data, run the following command:
+
+```bash
+TABLE_NAME=NaturEraGreenBankingTable \
+AWS_REGION=ap-southeast-2 \
+USER_ID=299ee438-c001-70ba-fed5-565b3b8d8ca2 \
+BALANCE=10000000 \
+npm run seed
+```
+
+PowerShell:
+
+```powershell
+$env:TABLE_NAME="NaturEraGreenBankingTable"
+$env:AWS_REGION="ap-southeast-2"
+$env:USER_ID="299ee438-c001-70ba-fed5-565b3b8d8ca2"
+$env:BALANCE="10000000"
+npm run seed
+```
+
+Optional: set `CARD_ID` to choose a specific card id. If omitted, the seed script derives a stable card id from `USER_ID`.
 
 ## Cleanup
 

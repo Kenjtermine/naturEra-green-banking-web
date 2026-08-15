@@ -1,26 +1,44 @@
-    // const { withErrorHandling } = require('../../middlewares/errorHandler');
-    // const { getGreenProfile } = require('../../services/greenProfileService');
-    import getGreenProfile from '../../services/greenProfileService.js'; // viết chuẩn ESM
+import getGreenProfile from '../../services/greenProfileService.js';
+import { requireAuthClaims } from '../../utils/authClaims.js';
 
-    async function GreenProfileHandler(event) {
-        try {
-            const requestId = event.pathParameters.requestId;
+const corsHeaders = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token',
+    'Access-Control-Allow-Methods': 'GET,OPTIONS',
+};
 
-            const claims = event.requestContext.authorizer.claims;
-            const callerId = claims.sub;
-            const callerRole = claims['custom:role'] || 'USER';
-
-            // 2. Gọi Service
-            const result = await getGreenProfile(requestId, callerId, callerRole);
-
-            // 3. Trả JSON về
+async function GreenProfileHandler(event) {
+    try {
+        if (event.httpMethod === 'OPTIONS') {
             return {
                 statusCode: 200,
-                body: JSON.stringify(result),
+                headers: corsHeaders,
+                body: '',
             };
-        } catch (err) {
-            return { statusCode: err.statusCode || 500, body: JSON.stringify({ message: err.message }) };
         }
-    }
 
-    export const handler = GreenProfileHandler;
+        const requestId = event.pathParameters?.userId || event.pathParameters?.requestId;
+        const claims = requireAuthClaims(event);
+        const callerId = claims.sub;
+        const callerRole = claims['custom:role'] || 'USER';
+
+        const result = await getGreenProfile(requestId, callerId, callerRole, claims);
+
+        return {
+            statusCode: 200,
+            headers: corsHeaders,
+            body: JSON.stringify(result),
+        };
+    } catch (err) {
+        return {
+            statusCode: err.statusCode || 500,
+            headers: corsHeaders,
+            body: JSON.stringify({
+                errorCode: err.errorCode || 'INTERNAL_ERROR',
+                message: err.message || 'Internal server error',
+            }),
+        };
+    }
+}
+
+export const handler = GreenProfileHandler;

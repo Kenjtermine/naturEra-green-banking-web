@@ -48,11 +48,11 @@ Resources:
     Properties:
       ClientName: GreenBanking-Web-Client
       UserPoolId: !Ref GreenBankingUserPool
-      
+
       # QUY TẮC SỐ 1: BẮT BUỘC FALSE cho Frontend Web (React/Vue/Angular)
       # Vì mã nguồn frontend ai cũng xem được, không thể giấu Secret Key.
-      GenerateSecret: false 
-      
+      GenerateSecret: false
+
       ExplicitAuthFlows:
         - ALLOW_USER_SRP_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH
@@ -62,20 +62,21 @@ Resources:
         - email
         - name
         - custom:role # Frontend ĐƯỢC PHÉP ĐỌC để biết đang là User hay Admin để hiện UI
-      
+
       WriteAttributes:
         - email
         - name
-        # KHÔNG CÓ 'custom:role' Ở ĐÂY. 
-        # Khi Frontend gọi hàm signUp() của thư viện aws-amplify mà cố tình 
+        # KHÔNG CÓ 'custom:role' Ở ĐÂY.
+        # Khi Frontend gọi hàm signUp() của thư viện aws-amplify mà cố tình
         # nhét custom:role="ADMIN" vào, Cognito sẽ lập tức ném lỗi cấm truy cập!
   GreenBankingApi:
     Type: AWS::Serverless::Api
     Properties:
       StageName: v1
-      Cors: 
+      Cors:
         AllowOrigin: "'*'" # MVP tạm để *, lên Prod sửa thành URL CloudFront
-        AllowHeaders: "'Content-Type,Authorization,X-Api-Key'"
+        AllowHeaders: "'Content-Type,Authorization,X-Api-Key,X-Amz-Date,X-Amz-Security-Token'"
+        AllowMethods: "'GET,POST,PUT,OPTIONS'"
       Auth:
         DefaultAuthorizer: CognitoAuthorizer
         AddDefaultAuthorizerToCorsPreflight: false
@@ -185,7 +186,7 @@ Resources:
       Events:
         ProcessTxn:
           Type: Api
-          Properties: 
+          Properties:
             RestApiId: !Ref GreenBankingApi
             Path: /transactions
             Method: POST
@@ -222,9 +223,54 @@ Resources:
             RestApiId: !Ref GreenBankingApi
             Path: /dashboard
             Method: get
+        GetBalance:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GreenBankingApi
+            Path: /accounts/{cardId}/balance
+            Method: get
+        GetUserTransactions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GreenBankingApi
+            Path: /users/{userId}/transactions
+            Method: get
+        GetCarbonCredits:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GreenBankingApi
+            Path: /users/{userId}/carbon-credits
+            Method: get
       Policies:
         - Statement:
             - Sid: DashboardReadOnlyAccess
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+              Resource: !GetAtt NaturEraGreenBankingTable.Arn
+              Condition:
+                "ForAllValues:StringLike":
+                  dynamodb:LeadingKeys:
+                    - "USER#*"
+
+  GreenProfileCardApi:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: src/functions/green-profile-card-api/Lambda.handler
+      Events:
+        GetCustomerProfile:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GreenBankingApi
+            Path: /users/{userId}/profile
+            Method: get
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Policies:
+        - Statement:
+            - Sid: CustomerProfileReadAccess
               Effect: Allow
               Action:
                 - dynamodb:GetItem
@@ -372,7 +418,7 @@ Resources:
             QueryString: false
             Cookies:
               Forward: none
-        
+
         # 💡 TỬ HUYỆT CỦA REACT/VITE (SPA): Đánh lừa CloudFront
         # Khi user F5 ở trang /dashboard, S3 sẽ báo lỗi 404 vì nó không có thư mục /dashboard
         # Khai báo này ép CloudFront trả về trang chủ index.html (200 OK) để React Router tự điều hướng

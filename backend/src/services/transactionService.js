@@ -5,8 +5,8 @@ import { debitAndRecordTransaction, getMonthlyCo2Usage, updateCardStatus } from 
 
 async function processTransaction(body, idempotencyKey) {
     const normalizedBody = {
-        cardId: body.cardId || body.card_id || "card_001",
-        userId: body.userId || "c9feb4a8-8021-70d2-c35f-e46ccbd687d", 
+        cardId: body.cardId || body.card_id,
+        userId: body.userId || body.user_id,
         amount: Number(body.amount || 0),
         currency: body.currency || "VND",
         merchantId: body.merchantId || body.merchant_id || "merchant_001",

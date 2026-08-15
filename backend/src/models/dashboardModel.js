@@ -1,25 +1,25 @@
 import AppError from '../utils/AppError.js';
 
 /**
- * Đúc dữ liệu của 1 Giao dịch
+ * Đúc dữ liệu của 1 Giao dịch theo contract frontend đang cần
  */
 function buildTransactionDTO(rawTxn) {
-    // Tránh lỗi khi gọi thuộc tính của Null/Undefined
     if (!rawTxn || typeof rawTxn !== 'object') return null;
 
     try {
         return {
-            transactionId: rawTxn.transactionId || 'UNKNOWN',
-            createdAt: rawTxn.createdAt || new Date().toISOString(),
+            transaction_id: rawTxn.transactionId || 'UNKNOWN',
+            timestamp: rawTxn.createdAt || new Date().toISOString(),
+            type: 'debit',
             amount: Number(rawTxn.amount) || 0,
-            merchantId: rawTxn.merchantId || 'UNKNOWN',
-            mcc: rawTxn.mcc || '0000',
-            co2Amount: Number(rawTxn.co2Amount) || 0,
-            status: rawTxn.status || 'UNKNOWN'
+            merchant_name: rawTxn.merchantId || 'Merchant',
+            mcc: rawTxn.mcc || null,
+            co2_estimate: Number(rawTxn.co2Amount) || 0,
+            description: rawTxn.description || rawTxn.merchantId || 'Transaction',
         };
     } catch (err) {
         console.error('Lỗi khi đúc Transaction DTO:', err);
-        return null; // Trả về null để hàm buildDashboardResponse filter bỏ đi, không làm chết cả API
+        return null;
     }
 }
 
@@ -68,4 +68,5 @@ function buildDashboardResponse(rawStat, rawTransactions) {
     };
 }
 
-export default buildDashboardResponse ;
+export { buildTransactionDTO };
+export default buildDashboardResponse;
