@@ -629,8 +629,8 @@ function MockPosScreen({ cardId, userId, jwtToken, onClose }) {
         <div className="p-5 space-y-4">
           {/* Endpoint badge */}
           <div className="flex items-center gap-2 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2">
-            <span className="text-xs font-bold text-emerald-400 font-mono">POST</span>
-            <span className="text-xs text-gray-400 font-mono">/transactions</span>
+            <span className="text-xs font-bold text-emerald-400 font-mono">EXECUTE</span>
+            <span className="text-xs text-gray-400 font-mono">TRANSACTION</span>
             <span className={`ml-auto text-xs font-semibold px-2 py-0.5 rounded ${IS_MOCK ? "bg-amber-500/20 text-amber-400" : "bg-emerald-500/20 text-emerald-400"}`}>
               {IS_MOCK ? "Mock" : "Live"}
             </span>
@@ -673,7 +673,7 @@ function MockPosScreen({ cardId, userId, jwtToken, onClose }) {
           <button onClick={handleSubmit} disabled={loading}
             className="w-full flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 disabled:bg-amber-800 text-gray-900 font-bold text-sm py-2.5 rounded-xl transition-colors">
             {loading ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
-            {loading ? "Sending…" : "POST /transactions"}
+            {loading ? "Sending…" : "EXECUTE TRANSACTION"}
           </button>
           <p className="text-xs text-gray-600 text-center">Màn hình này chỉ dành cho dev/QA. Không hiển thị trên Customer Portal.</p>
         </div>

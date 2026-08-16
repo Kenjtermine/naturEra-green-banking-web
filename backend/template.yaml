@@ -275,6 +275,8 @@ Resources:
               Action:
                 - dynamodb:GetItem
                 - dynamodb:Query
+                - dynamodb:PutItem
+                - dynamodb:TransactWriteItems
               Resource: !GetAtt NaturEraGreenBankingTable.Arn
               Condition:
                 "ForAllValues:StringLike":
